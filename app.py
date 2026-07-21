@@ -1,113 +1,90 @@
 import streamlit as st
+import google.generativeai as genai
 import pandas as pd
-from PIL import Image
 import json
-import io
-from concurrent.futures import ThreadPoolExecutor
-from google import genai
-from google.genai import types
+from PIL import Image
 
-st.set_page_config(page_title="نظام الإشعارات المالية Live", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="نظام الإشعارات المالية", layout="wide")
 
-st.sidebar.title("⚙️ الإعدادات")
-api_key = st.sidebar.text_input("ادخل مفتاح Gemini API:", type="password")
+# جلب مفتاح API من Secrets أو من الشريط الجانبي
+api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 if not api_key:
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
+    st.sidebar.title("الإعدادات")
+    api_key = st.sidebar.text_input("ادخل مفتاح Gemini API:", type="password")
 
 st.title("🧾 النظام المباشر لمعالجة الإشعارات المالية")
-st.write("رفع الإشعارات واستخراج البيانات فورياً ومشاركتها أونلاين.")
+st.write("رفع الإشعارات واستخراج البيانات فوراً ومشاركتها أونلاين")
 
 if not api_key:
-    st.warning("⚠️ يرجى إدخال مفتاح API في الشريط الجانبي للبدء.")
-    st.stop()
-
-client = genai.Client(api_key=api_key)
-
-def process_receipt(uploaded_file):
-    try:
-        image = Image.open(uploaded_file)
-        
-        prompt = """
-        اقرأ صورة الإشعار المالي واستخرج البيانات التالية بدقة باللغة العربية بصيغة JSON فقط:
-        {
-            "last_4_digits": "آخر 4 أرقام فقط من رقم العملية أو المرجع",
-            "recipient": "اسم المرسل إليه / الحساب المحول له",
-            "date": "تاريخ العملية فقط بصيغة YYYY-MM-DD",
-            "comment": "التعليق أو الملاحظة (إذا لم يوجد اكتب: لا يوجد)"
-        }
-        """
-        
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[image, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-        
-        data = json.loads(response.text)
-        return data
-        
-    except Exception as e:
-        return {
-            "last_4_digits": "غير واضح",
-            "recipient": "غير واضح",
-            "date": "غير واضح",
-            "comment": "خطأ في القراءة"
-        }
-
-uploaded_files = st.file_uploader(
-    "ارفع صور الإشعارات هنا (حتى 100+ صورة دفعة واحدة):", 
-    type=["jpg", "jpeg", "png"], 
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    st.info(f"تم استقبال {len(uploaded_files)} إشعار.")
+    st.warning("⚠️ في الشريط الجانبي ابدأ بإدخال مفتاح API")
+else:
+    genai.configure(api_key=api_key)
     
-    if st.button("بدء المعالجة واستخراج البيانات 🚀"):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    uploaded_files = st.file_uploader("ارفع صور الإشعارات هنا (حتى 100+ صورة دفعة واحدة)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+    
+    if uploaded_files:
+        st.info(f"تم استقبال {len(uploaded_files)} إشعار.")
         
-        results = []
-        total_files = len(uploaded_files)
-        
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(process_receipt, f) for f in uploaded_files]
+        if st.button("🚀 بدء المعالجة واستخراج البيانات"):
+            results = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            for idx, future in enumerate(futures):
-                result = future.result()
-                results.append(result)
-                
-                progress = (idx + 1) / total_files
-                progress_bar.progress(progress)
-                status_text.text(f"تمت معالجة {idx + 1} من أصل {total_files} إشعار...")
+            # استخدام موديل رؤية حديث وسريع
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            prompt = """
+            أنت خبير في قراءة وإدخال بيانات الإشعارات المالية والإيصالات البنكية (مثل تطبيق بنكك / Bankak).
+            استخرج البيانات التالية بدقة من الصورة، وأرجع النتيجة بصيغة JSON فقط وبدون أي كود أو كلام إضافي:
 
-        st.success("🎉 اكتمل استخراج البيانات بنجاح!")
-        
-        df = pd.DataFrame(results)
-        cols = ["last_4_digits", "recipient", "date", "comment"]
-        df = df[cols]
-        
-        df.columns = [
-            "آخر 4 أرقام من العملية", 
-            "المرسل إليه", 
-            "التاريخ", 
-            "التعليق / الملاحظة"
-        ]
-        
-        st.subheader("📊 جدول البيانات المعالجة حياً")
-        st.dataframe(df, use_container_width=True)
-        
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='بيانات الإشعارات')
-        
-        st.download_button(
-            label="📥 تحميل جدول البيانات (Excel)",
-            data=buffer.getvalue(),
-            file_name="بيانات_الإشعارات_المالية.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            {
+                "التاريخ": "تاريخ ووقت العملية",
+                "المرسل إليه": "اسم المستلم أو المرسل إليه",
+                "آخر 4 أرقام": "رقم الحساب أو آخر 4 أرقام منه",
+                "المبلغ": "المبلغ بالأرقام فقط",
+                "التعليق / الملاحظة": "مكتملة / ناجحة أو أي ملاحظة"
+            }
+            """
+
+            for i, file in enumerate(uploaded_files):
+                status_text.text(f"...تتم معالجة {i+1} من أصل {len(uploaded_files)} إشعار")
+                try:
+                    image = Image.open(file)
+                    response = model.generate_content([prompt, image])
+                    text = response.text.strip()
+                    
+                    # تنظيف النص واستخراج الـ JSON
+                    if "json" in text:
+                        text = text.split("json")[1].split("")[0].strip()
+                    elif "" in text:
+                        text = text.split("")[1].split("")[0].strip()
+                        
+                    data = json.loads(text)
+                    results.append(data)
+                except Exception as e:
+                    results.append({
+                        "التاريخ": "غير محدد",
+                        "المرسل إليه": "تعذر الاستخراج",
+                        "آخر 4 أرقام": "N/A",
+                        "المبلغ": "0",
+                        "التعليق / الملاحظة": "يرجى التأكد من وضوح الصورة"
+                    })
+                
+                progress_bar.progress((i + 1) / len(uploaded_files))
+                
+            status_text.success("🎉 اكتمل استخراج البيانات بنجاح!")
+            
+            if results:
+                df = pd.DataFrame(results)
+                st.subheader("📊 جدول البيانات المعالجة حياً")
+                st.dataframe(df, use_container_width=True)
+                
+                # زر تحميل Excel
+                csv = df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 تحميل جدول البيانات (CSV / Excel)",
+                    data=csv,
+                    file_name="receipts_data.csv",
+                    mime="text/csv",
+                )
