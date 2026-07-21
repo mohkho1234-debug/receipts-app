@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 import json
+import time
 from PIL import Image
 
 st.set_page_config(page_title="نظام الإشعارات المالية", layout="wide")
@@ -20,23 +21,8 @@ if not api_key:
 else:
     try:
         genai.configure(api_key=api_key)
-        
-        # جلب الموديلات المتاحة تلقائياً واختيار الأنسب
-        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        selected_model = None
-        for candidate in ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-2.0-flash', 'models/gemini-pro-vision']:
-            if candidate in all_models:
-                selected_model = candidate
-                break
-                
-        if not selected_model and all_models:
-            selected_model = all_models[0]
-            
-        if not selected_model:
-            selected_model = 'gemini-1.5-flash'
-
-        model = genai.GenerativeModel(selected_model)
+        # استخدام موديل 1.5-flash المستقر للخطة المجانية
+        model = genai.GenerativeModel('gemini-1.5-flash')
     except Exception as err:
         st.error(f"خطأ في تهيئة النظام: {err}")
 
@@ -64,35 +50,60 @@ else:
 
             for i, file in enumerate(uploaded_files):
                 status_text.text(f"جاري معالجة الإشعار رقم {i+1} من أصل {len(uploaded_files)}")
-                try:
-                    image = Image.open(file)
-                    response = model.generate_content([prompt, image])
-                    text = response.text.strip()
-                    
-                    start = text.find('{')
-                    end = text.rfind('}') + 1
-                    
-                    if start != -1 and end != 0:
-                        json_str = text[start:end]
-                        data = json.loads(json_str)
-                    else:
-                        data = {
-                            "التاريخ": "غير محدد",
-                            "المرسل إليه": "تعذر القراءة",
-                            "آخر 4 أرقام": "N/A",
-                            "المبلغ": "0",
-                            "التعليق / الملاحظة": "لم يتم التعرف على الصيغة"
-                        }
-                    results.append(data)
-                except Exception as e:
+                
+                max_retries = 3
+                success = False
+                
+                for attempt in range(max_retries):
+                    try:
+                        image = Image.open(file)
+                        response = model.generate_content([prompt, image])
+                        text = response.text.strip()
+                        
+                        start = text.find('{')
+                        end = text.rfind('}') + 1
+                        
+                        if start != -1 and end != 0:
+                            json_str = text[start:end]
+                            data = json.loads(json_str)
+                        else:
+                            data = {
+                                "التاريخ": "غير محدد",
+                                "المرسل إليه": "تعذر القراءة",
+                                "آخر 4 أرقام": "N/A",
+                                "المبلغ": "0",
+                                "التعليق / الملاحظة": "لم يتم التعرف على الصيغة"
+                            }
+                        results.append(data)
+                        success = True
+                        break
+                    except Exception as e:
+                        err_msg = str(e)
+                        if "429" in err_msg or "Quota" in err_msg:
+                            # الانتظار في حال الضغط على الكوتا
+                            time.sleep(4)
+                        else:
+                            results.append({
+                                "التاريخ": "خطأ",
+                                "المرسل إليه": "فشل الاستدعاء",
+                                "آخر 4 أرقام": "N/A",
+                                "المبلغ": "0",
+                                "التعليق / الملاحظة": err_msg[:50]
+                            })
+                            success = True
+                            break
+                
+                if not success:
                     results.append({
-                        "التاريخ": "خطأ",
-                        "المرسل إليه": "فشل الاستدعاء",
+                        "التاريخ": "تجاوز المعدل",
+                        "المرسل إليه": "يرجى المحاولة بعد دقيقة",
                         "آخر 4 أرقام": "N/A",
                         "المبلغ": "0",
-                        "التعليق / الملاحظة": str(e)
+                        "التعليق / الملاحظة": "تم تجاوز حد الطلبات المجاني"
                     })
                 
+                # فاصل زمني بسيط بين كل صورة لتجنب خطأ 429
+                time.sleep(2)
                 progress_bar.progress((i + 1) / len(uploaded_files))
                 
             status_text.success("🎉 اكتملت معالجة الصور بنجاح!")
