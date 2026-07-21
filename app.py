@@ -21,19 +21,22 @@ else:
     try:
         genai.configure(api_key=api_key)
         
-        # جلب الموديل المتاح تلقائياً لحسابك لمنع خطأ 404
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # جلب الموديلات المتاحة تلقائياً واختيار الأنسب
+        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        active_model_name = "gemini-1.5-flash"
-        # اختيار أفضل موديل متوفر في حسابك
-        for preferred in ['models/gemini-2.0-flash', 'models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro-vision']:
-            if preferred in available_models:
-                active_model_name = preferred
+        selected_model = None
+        for candidate in ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-2.0-flash', 'models/gemini-pro-vision']:
+            if candidate in all_models:
+                selected_model = candidate
                 break
-        elif available_models:
-            active_model_name = available_models[0]
+                
+        if not selected_model and all_models:
+            selected_model = all_models[0]
+            
+        if not selected_model:
+            selected_model = 'gemini-1.5-flash'
 
-        model = genai.GenerativeModel(active_model_name)
+        model = genai.GenerativeModel(selected_model)
     except Exception as err:
         st.error(f"خطأ في تهيئة النظام: {err}")
 
@@ -60,7 +63,7 @@ else:
             """
 
             for i, file in enumerate(uploaded_files):
-                status_text.text(f"...تتم معالجة {i+1} من أصل {len(uploaded_files)} إشعار")
+                status_text.text(f"جاري معالجة الإشعار رقم {i+1} من أصل {len(uploaded_files)}")
                 try:
                     image = Image.open(file)
                     response = model.generate_content([prompt, image])
@@ -95,4 +98,14 @@ else:
             status_text.success("🎉 اكتملت معالجة الصور بنجاح!")
             
             if results:
-                d…
+                df = pd.DataFrame(results)
+                st.subheader("📊 جدول البيانات المعالجة حياً")
+                st.dataframe(df, use_container_width=True)
+                
+                csv = df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 تحميل جدول البيانات (CSV / Excel)",
+                    data=csv,
+                    file_name="receipts_data.csv",
+                    mime="text/csv",
+                )
