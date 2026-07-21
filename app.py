@@ -19,32 +19,6 @@ st.write("رفع الإشعارات واستخراج البيانات فوراً
 if not api_key:
     st.warning("⚠️ في الشريط الجانبي ابدأ بإدخال مفتاح API")
 else:
-    try:
-        genai.configure(api_key=api_key)
-        
-        # البحث الديناميكي عن أي موديل يعمل بحسابك تلقائياً
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        # تحديد الموديل المناسب المتاح
-        chosen_model = None
-        for name in available_models:
-            if 'flash' in name or 'pro' in name:
-                chosen_model = name
-                break
-                
-        if not chosen_model and available_models:
-            chosen_model = available_models[0]
-            
-        if not chosen_model:
-            chosen_model = 'gemini-1.5-flash'
-            
-        model = genai.GenerativeModel(chosen_model)
-    except Exception as err:
-        st.error(f"خطأ في الاتصال بالخدمة: {err}")
-
     uploaded_files = st.file_uploader("ارفع صور الإشعارات هنا (حتى 100+ صورة دفعة واحدة)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -54,6 +28,31 @@ else:
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
+            try:
+                genai.configure(api_key=api_key)
+                
+                # جلب أول موديل يدعم توليد المحتوى تلقائياً من حسابك
+                valid_models = [
+                    m.name for m in genai.list_models() 
+                    if 'generateContent' in m.supported_generation_methods
+                ]
+                
+                # الترتيب حسب الأحدث المتاح
+                selected_model_name = None
+                for m_name in valid_models:
+                    if 'flash' in m_name:
+                        selected_model_name = m_name
+                        break
+                
+                if not selected_model_name and valid_models:
+                    selected_model_name = valid_models[0]
+                    
+                model = genai.GenerativeModel(selected_model_name)
+                
+            except Exception as e:
+                st.error(f"خطأ في تهيئة المفتاح أو جلب الموديلات: {e}")
+                st.stop()
             
             prompt = """
             اقرأ صورة إشعار التحويل المالي البنكي واستخرج منه التفاصيل التالية.
