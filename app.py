@@ -6,7 +6,6 @@ from PIL import Image
 
 st.set_page_config(page_title="نظام الإشعارات المالية", layout="wide")
 
-# جلب مفتاح API من Secrets أو من الشريط الجانبي
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 if not api_key:
@@ -19,8 +18,11 @@ st.write("رفع الإشعارات واستخراج البيانات فوراً
 if not api_key:
     st.warning("⚠️ في الشريط الجانبي ابدأ بإدخال مفتاح API")
 else:
-    genai.configure(api_key=api_key)
-    
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as err:
+        st.error(f"خطأ في تهيئة المفتاح: {err}")
+
     uploaded_files = st.file_uploader("ارفع صور الإشعارات هنا (حتى 100+ صورة دفعة واحدة)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -31,19 +33,18 @@ else:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # استخدام موديل رؤية حديث وسريع
+            # استخدام موديل رؤية مستقر
             model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = """
-            أنت خبير في قراءة وإدخال بيانات الإشعارات المالية والإيصالات البنكية (مثل تطبيق بنكك / Bankak).
-            استخرج البيانات التالية بدقة من الصورة، وأرجع النتيجة بصيغة JSON فقط وبدون أي كود أو كلام إضافي:
-
+            اقرأ صورة إشعار التحويل المالي البنكي واستخرج منه التفاصيل التالية.
+            أرجع الإجابة بصيغة JSON خامة فقط وبدون أي أوسمة ماركداون:
             {
-                "التاريخ": "تاريخ ووقت العملية",
-                "المرسل إليه": "اسم المستلم أو المرسل إليه",
-                "آخر 4 أرقام": "رقم الحساب أو آخر 4 أرقام منه",
-                "المبلغ": "المبلغ بالأرقام فقط",
-                "التعليق / الملاحظة": "مكتملة / ناجحة أو أي ملاحظة"
+                "التاريخ": "التاريخ والوقت",
+                "المرسل إليه": "اسم المستلم",
+                "آخر 4 أرقام": "آخر أرقام رقم الحساب",
+                "المبلغ": "المبلغ بالأرقام",
+                "التعليق / الملاحظة": "ناجحة"
             }
             """
 
@@ -54,33 +55,40 @@ else:
                     response = model.generate_content([prompt, image])
                     text = response.text.strip()
                     
-                    # تنظيف النص واستخراج الـ JSON
-                    if "json" in text:
-                        text = text.split("json")[1].split("")[0].strip()
-                    elif "" in text:
-                        text = text.split("")[1].split("")[0].strip()
-                        
-                    data = json.loads(text)
+                    # استخراج الـ JSON بدقة مهما كانت تحسينات النص
+                    start = text.find('{')
+                    end = text.rfind('}') + 1
+                    
+                    if start != -1 and end != 0:
+                        json_str = text[start:end]
+                        data = json.loads(json_str)
+                    else:
+                        data = {
+                            "التاريخ": "غير محدد",
+                            "المرسل إليه": "تعذر القراءة",
+                            "آخر 4 أرقام": "N/A",
+                            "المبلغ": "0",
+                            "التعليق / الملاحظة": f"استجابة غير معيارية: {text[:40]}"
+                        }
                     results.append(data)
                 except Exception as e:
                     results.append({
-                        "التاريخ": "غير محدد",
-                        "المرسل إليه": "تعذر الاستخراج",
+                        "التاريخ": "خطأ",
+                        "المرسل إليه": "فشل الاستدعاء",
                         "آخر 4 أرقام": "N/A",
                         "المبلغ": "0",
-                        "التعليق / الملاحظة": "يرجى التأكد من وضوح الصورة"
+                        "التعليق / الملاحظة": f"سبب الخطأ: {str(e)}"
                     })
                 
                 progress_bar.progress((i + 1) / len(uploaded_files))
                 
-            status_text.success("🎉 اكتمل استخراج البيانات بنجاح!")
+            status_text.success("🎉 اكتملت معالجة الصور!")
             
             if results:
                 df = pd.DataFrame(results)
                 st.subheader("📊 جدول البيانات المعالجة حياً")
                 st.dataframe(df, use_container_width=True)
                 
-                # زر تحميل Excel
                 csv = df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
                     label="📥 تحميل جدول البيانات (CSV / Excel)",
