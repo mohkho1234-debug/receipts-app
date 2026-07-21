@@ -20,8 +20,22 @@ if not api_key:
 else:
     try:
         genai.configure(api_key=api_key)
+        
+        # جلب الموديل المتاح تلقائياً لحسابك لمنع خطأ 404
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        active_model_name = "gemini-1.5-flash"
+        # اختيار أفضل موديل متوفر في حسابك
+        for preferred in ['models/gemini-2.0-flash', 'models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro-vision']:
+            if preferred in available_models:
+                active_model_name = preferred
+                break
+        elif available_models:
+            active_model_name = available_models[0]
+
+        model = genai.GenerativeModel(active_model_name)
     except Exception as err:
-        st.error(f"خطأ في تهيئة المفتاح: {err}")
+        st.error(f"خطأ في تهيئة النظام: {err}")
 
     uploaded_files = st.file_uploader("ارفع صور الإشعارات هنا (حتى 100+ صورة دفعة واحدة)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     
@@ -32,9 +46,6 @@ else:
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
-            # استخدام موديل رؤية مستقر
-            model = genai.GenerativeModel('gemini-1.5-flash')
             
             prompt = """
             اقرأ صورة إشعار التحويل المالي البنكي واستخرج منه التفاصيل التالية.
@@ -55,7 +66,6 @@ else:
                     response = model.generate_content([prompt, image])
                     text = response.text.strip()
                     
-                    # استخراج الـ JSON بدقة مهما كانت تحسينات النص
                     start = text.find('{')
                     end = text.rfind('}') + 1
                     
@@ -68,7 +78,7 @@ else:
                             "المرسل إليه": "تعذر القراءة",
                             "آخر 4 أرقام": "N/A",
                             "المبلغ": "0",
-                            "التعليق / الملاحظة": f"استجابة غير معيارية: {text[:40]}"
+                            "التعليق / الملاحظة": "لم يتم التعرف على الصيغة"
                         }
                     results.append(data)
                 except Exception as e:
@@ -77,22 +87,12 @@ else:
                         "المرسل إليه": "فشل الاستدعاء",
                         "آخر 4 أرقام": "N/A",
                         "المبلغ": "0",
-                        "التعليق / الملاحظة": f"سبب الخطأ: {str(e)}"
+                        "التعليق / الملاحظة": str(e)
                     })
                 
                 progress_bar.progress((i + 1) / len(uploaded_files))
                 
-            status_text.success("🎉 اكتملت معالجة الصور!")
+            status_text.success("🎉 اكتملت معالجة الصور بنجاح!")
             
             if results:
-                df = pd.DataFrame(results)
-                st.subheader("📊 جدول البيانات المعالجة حياً")
-                st.dataframe(df, use_container_width=True)
-                
-                csv = df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 تحميل جدول البيانات (CSV / Excel)",
-                    data=csv,
-                    file_name="receipts_data.csv",
-                    mime="text/csv",
-                )
+                d…
