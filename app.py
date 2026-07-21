@@ -32,23 +32,35 @@ else:
             try:
                 genai.configure(api_key=api_key)
                 
-                # جلب أول موديل يدعم توليد المحتوى تلقائياً من حسابك
-                valid_models = [
-                    m.name for m in genai.list_models() 
+                # جلب قائمة الموديلات المتاحة وتصفية الاسم من بادئة models/
+                all_models = [
+                    m.name.replace('models/', '') 
+                    for m in genai.list_models() 
                     if 'generateContent' in m.supported_generation_methods
                 ]
                 
-                # الترتيب حسب الأحدث المتاح
-                selected_model_name = None
-                for m_name in valid_models:
-                    if 'flash' in m_name:
-                        selected_model_name = m_name
+                # قائمة النماذج المفضلة حسب الأحدث والأكثر استقراراً
+                preferred_order = [
+                    'gemini-1.5-flash',
+                    'gemini-1.5-flash-latest',
+                    'gemini-1.5-pro',
+                    'gemini-2.0-flash-exp',
+                    'gemini-1.0-pro-vision'
+                ]
+                
+                selected_model = None
+                for candidate in preferred_order:
+                    if candidate in all_models:
+                        selected_model = candidate
                         break
                 
-                if not selected_model_name and valid_models:
-                    selected_model_name = valid_models[0]
+                if not selected_model and all_models:
+                    selected_model = all_models[0]
                     
-                model = genai.GenerativeModel(selected_model_name)
+                if not selected_model:
+                    selected_model = 'gemini-1.5-flash'
+
+                model = genai.GenerativeModel(selected_model)
                 
             except Exception as e:
                 st.error(f"خطأ في تهيئة المفتاح أو جلب الموديلات: {e}")
@@ -98,7 +110,7 @@ else:
                         "التعليق / الملاحظة": str(e)
                     })
                 
-                time.sleep(1)
+                time.sleep(1.5)
                 progress_bar.progress((i + 1) / len(uploaded_files))
                 
             status_text.success("🎉 اكتملت معالجة الصور بنجاح!")
